@@ -11,34 +11,51 @@ from mediapipe.tasks.python import vision
 class FaceDetector:
     """Face detector using MediaPipe FaceDetector on rotated image variants."""
 
-    _ANGLES = (-30, -15, 0, 15, 30)
+    _ANGLE_PRESETS = {
+        "realtime": (0, -20, 20),
+        "balanced": (0, -30, 30, -15, 15),
+        "accurate": (0, -45, 45, -30, 30, -15, 15, -60, 60),
+    }
     MIN_FACE_PX = 40
     MAX_CANDIDATES = 200
     MAX_FACES = 10
     NMS_IOU_THRESHOLD = 0.35
-    _MODEL_URL = (
+    _SHORT_RANGE_MODEL_URL = (
         "https://storage.googleapis.com/mediapipe-models/face_detector/"
         "blaze_face_short_range/float16/latest/blaze_face_short_range.tflite"
     )
+    _FULL_RANGE_MODEL_URL = (
+        "https://storage.googleapis.com/mediapipe-models/face_detector/"
+        "blaze_face_full_range/float16/latest/blaze_face_full_range.tflite"
+    )
 
     def __init__(self):
-        model_path = os.path.join(
+        short_range_model_path = os.path.join(
             os.path.dirname(__file__), "models", "blaze_face_short_range.tflite"
         )
-        self._ensure_model(model_path)
+        full_range_model_path = os.path.join(
+            os.path.dirname(__file__), "models", "blaze_face_full_range.tflite"
+        )
+        self._ensure_model(short_range_model_path, self._SHORT_RANGE_MODEL_URL)
+        self._ensure_model(full_range_model_path, self._FULL_RANGE_MODEL_URL)
 
-        options = vision.FaceDetectorOptions(
-            base_options=mp_python.BaseOptions(model_asset_path=model_path),
+        short_range_options = vision.FaceDetectorOptions(
+            base_options=mp_python.BaseOptions(model_asset_path=short_range_model_path),
             min_detection_confidence=0.25,
         )
-        self.face_detector = vision.FaceDetector.create_from_options(options)
+        full_range_options = vision.FaceDetectorOptions(
+            base_options=mp_python.BaseOptions(model_asset_path=full_range_model_path),
+            min_detection_confidence=0.20,
+        )
+        self.short_range_detector = vision.FaceDetector.create_from_options(short_range_options)
+        self.full_range_detector = vision.FaceDetector.create_from_options(full_range_options)
 
-    def _ensure_model(self, model_path):
+    def _ensure_model(self, model_path, model_url):
         if os.path.exists(model_path):
             return
 
         os.makedirs(os.path.dirname(model_path), exist_ok=True)
-        urllib.request.urlretrieve(self._MODEL_URL, model_path)
+        urllib.request.urlretrieve(model_url, model_path)
 
     @staticmethod
     def _clamp_px(x1, y1, x2, y2, w, h):
@@ -106,21 +123,37 @@ class FaceDetector:
             transformed.append((tx, ty))
         return transformed
 
-    def detect_faces_bgr(self, image_bgr, threshold=0.5):
-        """
-        Detect faces by running MediaPipe FaceDetection on rotated versions.
+    @staticmethod
+    def _enhance_for_detection(image_bgr):
+        # Mild local contrast enhancement helps recover low-contrast, angled faces.
+        lab = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(lab)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        l_enhanced = clahe.apply(l)
+        merged = cv2.merge((l_enhanced, a, b))
+        return cv2.cvtColor(merged, cv2.COLOR_LAB2BGR)
 
-        Returns:
-            (faces, (width, height))
-        """
+    def _resolve_angles(self, angle_mode):
+        return self._ANGLE_PRESETS.get(angle_mode, self._ANGLE_PRESETS["balanced"])
+
+    @staticmethod
+    def _resolve_max_faces(max_faces, default_max_faces):
+        try:
+            requested = int(max_faces)
+        except (TypeError, ValueError):
+            requested = default_max_faces
+
+        return int(np.clip(requested, 1, 10))
+
+    def _build_candidates_from_detector(self, detector, image_bgr, threshold, angles):
         h, w = image_bgr.shape[:2]
         candidates = []
 
-        for angle in self._ANGLES:
+        for angle in angles:
             rotated_bgr, rot_mat = self._rotate_image(image_bgr, angle)
             rotated_rgb = cv2.cvtColor(rotated_bgr, cv2.COLOR_BGR2RGB)
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rotated_rgb)
-            result = self.face_detector.detect(mp_image)
+            result = detector.detect(mp_image)
 
             if not result.detections:
                 continue
@@ -167,12 +200,59 @@ class FaceDetector:
                     }
                 )
 
+        return candidates
+
+    def detect_faces_bgr(self, image_bgr, threshold=0.5, max_faces=10, angle_mode="balanced"):
+        """
+        Detect faces by running MediaPipe FaceDetection on rotated versions.
+
+        Returns:
+            (faces, (width, height))
+        """
+        h, w = image_bgr.shape[:2]
+
+        max_faces_clamped = self._resolve_max_faces(max_faces, self.MAX_FACES)
+        angle_mode_resolved = angle_mode if angle_mode in self._ANGLE_PRESETS else "balanced"
+        angles = self._resolve_angles(angle_mode_resolved)
+
+        candidates = []
+        candidates.extend(
+            self._build_candidates_from_detector(
+                self.short_range_detector,
+                image_bgr,
+                threshold,
+                angles,
+            )
+        )
+
+        use_full_range = angle_mode_resolved != "realtime"
+        if use_full_range:
+            candidates.extend(
+                self._build_candidates_from_detector(
+                    self.full_range_detector,
+                    image_bgr,
+                    max(0.15, threshold - 0.05),
+                    angles,
+                )
+            )
+
+        if angle_mode_resolved == "accurate":
+            enhanced_bgr = self._enhance_for_detection(image_bgr)
+            candidates.extend(
+                self._build_candidates_from_detector(
+                    self.short_range_detector,
+                    enhanced_bgr,
+                    max(0.15, threshold - 0.05),
+                    angles,
+                )
+            )
+
         if len(candidates) > self.MAX_CANDIDATES:
             candidates = sorted(candidates, key=lambda item: item["score"], reverse=True)[
                 : self.MAX_CANDIDATES
             ]
 
         faces = self._nms(candidates, iou_threshold=self.NMS_IOU_THRESHOLD)
-        faces = sorted(faces, key=lambda item: item["score"], reverse=True)[: self.MAX_FACES]
+        faces = sorted(faces, key=lambda item: item["score"], reverse=True)[:max_faces_clamped]
 
         return faces, (w, h)

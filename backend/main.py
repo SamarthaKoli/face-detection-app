@@ -31,7 +31,12 @@ def health():
     return {"status": "ok"}
 
 @app.post("/detect")
-async def detect(file: UploadFile = File(...), threshold: float = Form(0.5)):
+async def detect(
+    file: UploadFile = File(...),
+    threshold: float = Form(0.5),
+    max_faces: int = Form(10),
+    angle_mode: str = Form("balanced"),
+):
     # read bytes
     data = await file.read()
 
@@ -42,8 +47,18 @@ async def detect(file: UploadFile = File(...), threshold: float = Form(0.5)):
     # convert RGB to BGR for OpenCV
     image_bgr = image_rgb[:, :, ::-1].copy()
     
+    threshold = float(np.clip(threshold, 0.05, 0.95))
+    max_faces = int(np.clip(max_faces, 1, 10))
+    allowed_modes = {"realtime", "balanced", "accurate"}
+    angle_mode = angle_mode if angle_mode in allowed_modes else "balanced"
+
     # detect faces
-    faces, (w, h) = face_detector.detect_faces_bgr(image_bgr, threshold=threshold)
+    faces, (w, h) = face_detector.detect_faces_bgr(
+        image_bgr,
+        threshold=threshold,
+        max_faces=max_faces,
+        angle_mode=angle_mode,
+    )
 
     # for compatibility, also return single-face fields from the best detection
     if faces:
@@ -67,6 +82,8 @@ async def detect(file: UploadFile = File(...), threshold: float = Form(0.5)):
         "bbox_px": bbox_px,
         "label": label,
         "threshold_used": threshold,
+        "max_faces_used": max_faces,
+        "angle_mode_used": angle_mode,
     }
 
 

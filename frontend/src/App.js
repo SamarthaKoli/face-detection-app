@@ -13,6 +13,8 @@ function App() {
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [faceThreshold, setFaceThreshold] = useState(0.5);
+  const [maxFaces, setMaxFaces] = useState(10);
+  const [angleMode, setAngleMode] = useState("balanced");
   const [settings, setSettings] = useState(() => getSettings());
   const [showMappingDebug, setShowMappingDebug] = useState(false);
 
@@ -286,6 +288,8 @@ function App() {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("threshold", String(faceThreshold));
+    formData.append("max_faces", String(maxFaces));
+    formData.append("angle_mode", angleMode);
 
     const response = await fetch(`${API_BASE_URL}/detect`, {
       method: "POST",
@@ -723,6 +727,35 @@ function App() {
                   />
                 </div>
 
+                <div className="flex flex-col gap-3 bg-surface-container-low p-4 rounded-[15px]">
+                  <div className="flex items-end justify-between gap-4">
+                    <label className="font-label text-[0.6875rem] uppercase tracking-[0.05em] text-outline">Max Faces</label>
+                    <span className="font-headline font-bold text-[#3953bd]">{maxFaces}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="1"
+                    max="10"
+                    step="1"
+                    value={maxFaces}
+                    onChange={(e) => setMaxFaces(Number(e.target.value))}
+                    className="w-full accent-[#3953bd]"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-2 bg-surface-container-low p-4 rounded-[15px]">
+                  <label className="font-label text-[0.6875rem] uppercase tracking-[0.05em] text-outline">Angle Mode</label>
+                  <select
+                    value={angleMode}
+                    onChange={(e) => setAngleMode(e.target.value)}
+                    className="bg-surface-container-high rounded-[10px] px-3 py-2 text-sm text-on-surface border border-surface-variant/40"
+                  >
+                    <option value="realtime">Realtime (faster)</option>
+                    <option value="balanced">Balanced</option>
+                    <option value="accurate">Accurate (best for tilted/profile)</option>
+                  </select>
+                </div>
+
                 <label className="flex items-center gap-2 text-sm text-on-surface-variant">
                   <input
                     type="checkbox"
@@ -879,6 +912,14 @@ function App() {
                         <div className="bg-surface-container p-3 rounded-[12px]">
                           <span className="block text-[10px] text-outline font-bold uppercase">Image Height</span>
                           <span className="font-mono text-on-surface">{normalized.image_height ?? "N/A"}</span>
+                        </div>
+                        <div className="bg-surface-container p-3 rounded-[12px]">
+                          <span className="block text-[10px] text-outline font-bold uppercase">Angle Mode</span>
+                          <span className="font-mono text-on-surface">{normalized.raw?.angle_mode_used ?? "N/A"}</span>
+                        </div>
+                        <div className="bg-surface-container p-3 rounded-[12px]">
+                          <span className="block text-[10px] text-outline font-bold uppercase">Max Faces Used</span>
+                          <span className="font-mono text-on-surface">{normalized.raw?.max_faces_used ?? "N/A"}</span>
                         </div>
                       </div>
 
