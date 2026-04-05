@@ -1,246 +1,142 @@
 # Detectify: Face Detection App
 
-A real-time face detection web app built with React (frontend) and FastAPI (backend) using a TensorFlow neural network model.
+Detectify is a React + FastAPI face detection app built for multi-face images and webcam captures. The current backend uses MediaPipe face detectors with rotated-image passes so it can handle up to 10 faces, tilted faces, and mixed viewing angles more reliably than a single-pass detector.
 
-## Features
+## What It Supports
 
-- **Upload detection**: Drag and drop images or browse files to detect faces.
-- **Webcam detection**: Real-time face detection via webcam with optional auto-detect.
-- **Threshold slider**: Adjust face confidence threshold (0.1–0.9) without backend changes.
-- **Object-cover aware**: Bounding boxes account for image scaling and cropping.
-- **Separate CORS origins**: Hardened CORS policy via environment variables.
-- **QA checklist & debug panel**: Built-in verification and backend response inspection.
+- Upload images or use a webcam feed.
+- Detect up to 10 faces in one frame.
+- Handle frontal, tilted, rotated, and partial-profile faces.
+- Switch between `realtime`, `balanced`, and `accurate` angle modes.
+- Tune confidence threshold without changing backend code.
+- Show per-face overlays, scores, and debug response data.
+- Store history and settings in the browser.
 
-## Quick Setup (Windows)
+## Project Layout
+
+- `backend/` FastAPI API and face detection logic.
+- `frontend/` React UI.
+- `backend/models/` MediaPipe TFLite detector assets.
+
+## Requirements
+
+- Python 3.11 recommended.
+- Node.js 18+ recommended.
+- Windows PowerShell or another shell that can run the provided commands.
+
+## Setup
 
 ### Backend
-
-#### 1. Create virtual environment
 
 ```powershell
 cd backend
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-```
-
-#### 2. Install dependencies
-
-```powershell
 pip install -r requirements.txt
 ```
 
-If `requirements.txt` doesn't exist, install manually:
+If you do not have a requirements file, install the runtime packages manually:
 
 ```powershell
-pip install fastapi uvicorn pillow numpy tensorflow
+pip install fastapi uvicorn pillow numpy opencv-python mediapipe python-multipart
 ```
 
-#### 3. Create .env file (optional)
-
-Copy `.env.example` to `.env` and update if needed:
+Start the API with the backend virtual environment Python so the installed packages are used:
 
 ```powershell
-copy .env.example .env
+cd backend
+.\.venv\Scripts\python.exe -m uvicorn main:app --reload --port 8000
 ```
 
-Default: `FRONTEND_ORIGIN=http://localhost:3000`
+Health check:
 
-#### 4. Start backend
-
-```powershell
-python -m uvicorn main:app --reload --host 127.0.0.1 --port 8000
+```text
+GET http://127.0.0.1:8000/health
 ```
 
-Run this from the repository root, or `cd backend` and use the same command.
+Expected response:
 
-Backend will be available at `http://localhost:8000`.
-
-Test the health endpoint:
-- Open browser: `http://localhost:8000/health`
-- Expected: `{"status":"ok"}`
-
-View API docs:
-- Swagger UI: `http://localhost:8000/docs`
-- ReDoc: `http://localhost:8000/redoc`
+```json
+{"status":"ok"}
+```
 
 ### Frontend
-
-#### 1. Create .env file (optional)
-
-From the `frontend` directory:
-
-```powershell
-copy .env.example .env
-```
-
-Default: `REACT_APP_API_BASE_URL=http://localhost:8000`
-
-#### 2. Install dependencies
 
 ```powershell
 cd frontend
 npm install
-```
-
-#### 3. Start development server
-
-```powershell
 npm start
 ```
 
-Frontend will open at `http://localhost:3000`.
+By default the frontend expects the backend at:
 
-## Testing the App
-
-### Upload Flow
-
-1. Click **Upload Image** tab.
-2. Drag and drop an image or browse files.
-3. Click **Detect Face (Upload)**.
-4. Confirm green box appears on detected face and confidence score shows.
-
-### Webcam Flow
-
-1. Click **Webcam** tab.
-2. Click **Start Webcam** (allow camera permissions).
-3. Click **Capture + Detect** or enable **Auto Detect: On**.
-4. Confirm overlay box aligns with your face in the video.
-5. Adjust the **Face Threshold** slider (0.1–0.9) to see label change in real-time.
-
-### Debug Panel
-
-After detection, scroll to **Debug Panel** to inspect:
-- Backend response fields: `bbox_px`, `image_width`, `image_height`
-- Raw JSON response
-
-## Environment Variables
-
-### Backend
-
-```env
-FRONTEND_ORIGIN=http://localhost:3000
+```text
+http://localhost:8000
 ```
 
-- Controls CORS allowed origin.
-- Change for production deployments.
+If you need to change that, set `REACT_APP_API_BASE_URL` in `frontend/.env`.
 
-### Frontend
+## API
 
-```env
-REACT_APP_API_BASE_URL=http://localhost:8000
-```
+### `POST /detect`
 
-- API endpoint for backend.
-- Required to point to your backend URL.
+Form fields:
+
+- `file`: image upload
+- `threshold`: confidence threshold, default `0.5`
+- `max_faces`: number of faces to return, clamped to `1..10`
+- `angle_mode`: `realtime`, `balanced`, or `accurate`
+
+Response includes:
+
+- `faces`: array of detected faces
+- `image_width`, `image_height`
+- `score`, `bbox`, `bbox_px`, `label` for compatibility with the UI
+- `threshold_used`, `max_faces_used`, `angle_mode_used`
+
+## Recommended Tuning
+
+- `realtime`: fastest webcam mode, best when latency matters.
+- `balanced`: good default for most uploads and webcam use.
+- `accurate`: best for tilted, rotated, or profile-heavy scenes.
+
+Suggested starting values:
+
+- Frontal, easy scenes: threshold `0.5`, max faces `5..10`, `balanced`
+- Crowded scenes: threshold `0.4..0.5`, max faces `10`, `balanced`
+- Hard pose variation: threshold `0.3..0.45`, max faces `10`, `accurate`
+
+## How To Verify
+
+1. Open `http://localhost:8000/health` and confirm the backend returns `{"status":"ok"}`.
+2. Upload an image with multiple people and verify multiple boxes appear.
+3. Test a rotated or tilted face and switch `Angle Mode` to `accurate`.
+4. Check the debug panel in the UI for the raw backend response.
+5. For webcam, compare `realtime` and `accurate` modes for speed and recall.
 
 ## Troubleshooting
 
-### TensorFlow Model Loading
+### Backend import errors
 
-**Problem**: `Error loading models/facetracker.h5` or `ModuleNotFoundError: No module named 'tensorflow'`
+If Uvicorn says a module is missing, run the backend with the backend venv Python:
 
-**Solutions**:
-
-1. **Reinstall TensorFlow**: Sometimes the first install fails silently.
-   ```powershell
-   pip uninstall tensorflow -y
-   pip install tensorflow
-   ```
-
-2. **Check Python version**: TensorFlow works best on Python 3.8–3.11.
-   ```powershell
-   python --version
-   ```
-
-3. **Verify model file exists**: Ensure `backend/models/facetracker.h5` is present.
-   ```powershell
-   ls backend/models/
-   ```
-
-4. **Clear pip cache** (if install hangs):
-   ```powershell
-   pip install --no-cache-dir tensorflow
-   ```
-
-5. **CPU-only TensorFlow** (if you don't have CUDA):
-   - Current setup uses CPU by default (slower inference).
-   - Install `tensorflow-intel` for better CPU performance:
-     ```powershell
-     pip uninstall tensorflow -y
-     pip install tensorflow-intel
-     ```
-
-### Webcam Permissions
-
-**Problem**: "Could not access webcam" or "PermissionError"
-
-**Solutions**:
-
-1. **Allow camera in browser**: When prompted, click "Allow" (or check Settings > Privacy > Camera).
-
-2. **HTTPS required**: Some browsers restrict camera to HTTPS or localhost only.
-   - Localhost (http://localhost:3000) is allowed by default.
-   - For other hosts, serve over HTTPS.
-
-3. **Check device**: Ensure your system has a working webcam.
-   ```powershell
-   # Windows: Open Settings > Privacy & Security > Camera
-   # Confirm app has camera access
-   ```
-
-4. **Browser compatibility**: Test in Chrome/Edge (best support).
-   - Firefox also works but requires explicit permission each time.
-
-### CORS Errors
-
-**Problem**: "Access to XMLHttpRequest blocked by CORS policy"
-
-**Solution**: Ensure `FRONTEND_ORIGIN` in backend matches your frontend URL:
-
-- Frontend at `http://localhost:3000` → Backend `.env`: `FRONTEND_ORIGIN=http://localhost:3000`
-- Frontend at `http://0.0.0.0:3000` → Backend `.env`: `FRONTEND_ORIGIN=http://0.0.0.0:3000`
-
-### Slow Detection
-
-**Problem**: Detection takes 5+ seconds.
-
-**Causes**:
-- Running TensorFlow on CPU (no CUDA/GPU).
-- Python version mismatch.
-- Model file corrupted.
-
-**Solutions**:
-- Install GPU drivers and CUDA toolkit (advanced).
-- Or accept ~1–2 sec inference time on CPU (normal).
-
-## Project Structure
-
-```
-face-detection/
-├── backend/
-│   ├── main.py                 # FastAPI app
-│   ├── predictor.py            # TensorFlow model + predict function
-│   ├── models/
-│   │   └── facetracker.h5      # Pre-trained model
-│   ├── .env.example            # Example env file
-│   └── requirements.txt         # Python dependencies
-├── frontend/
-│   ├── src/
-│   │   ├── App.js              # Main React component
-│   │   ├── App.css             # Styling
-│   │   └── ...
-│   ├── .env.example            # Example env file
-│   ├── package.json            # NPM dependencies
-│   └── public/
-└── README.md                    # This file
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m uvicorn main:app --reload --port 8000
 ```
 
-## Development Notes
+### CORS errors
 
-- **Overlay math**: Uses `object-fit: cover` aware mapping to ensure bounding boxes align with DOM elements.
-- **Auto-detect throttling**: Webcam auto-detect fires every 400 ms, guardrailed by an in-flight flag to prevent overlapping requests.
-- **Threshold-aware UI**: The confidence threshold is frontend-only; backend always returns raw score (0–1).
+Make sure `FRONTEND_ORIGIN` matches the frontend URL, usually `http://localhost:3000`.
+
+### Slow detection
+
+Use `realtime` mode for webcam. Use `balanced` or `accurate` only when needed.
+
+### No faces detected
+
+Lower the threshold slightly and try `accurate` mode for angled faces.
 
 ## License
 
-Detectify © 2026. Curated intelligence for face detection.
+Detectify © 2026.
